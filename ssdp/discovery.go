@@ -68,8 +68,9 @@ func (d *Discovery) Listener(iface net.Interface, ifAddr string) error {
 		return err
 	}
 
-	conn, err := net.ListenPacket("udp4", fmt.Sprintf("0.0.0.0:%d", ssdpDiscoveryPort))
+	conn, err := net.ListenPacket("udp4", fmt.Sprintf("%s:%d", "0.0.0.0", ssdpDiscoveryPort))
 	if err != nil {
+		return err
 		panic(err)
 	}
 

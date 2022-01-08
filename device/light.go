@@ -21,39 +21,39 @@ type YeeLight struct {
 	id         uint32
 	ip         string
 	model      string
-	fwVer      int
-	name       string
+	FwVer      int
+	Nam        string
 	support    []string
-	power      bool
-	bright     int
-	colorMode  int
-	temp       int
-	rgb        int
-	hue        int
-	sat        int
+	Power      bool
+	Bright     int
+	ColorMode  int
+	ColorTemp  int
+	Rgb        int
+	Hue        int
+	Sat        int
 	conn       net.Conn
 	counter    uint32
 }
 
 // Create device object. ip should set separatly.
 func NewYeeLight(id uint32, token []byte, model string, fw int, support []string, power bool, bright int, colorMode int,
-	temp int, rgb int, hue int, sat int, name string) Device {
+	temp int, rgb int, hue int, sat int, name string) *YeeLight {
 
 	return &YeeLight{
-		id:    id,
+		id:         id,
 		deviceType: CheckDevice(model),
-		token: token,
-		model: model,
-		fwVer: fw,
-		support: support,
-		power: power,
-		bright: bright,
-		colorMode: colorMode,
-		temp: temp,
-		rgb: rgb,
-		hue: hue,
-		sat: sat,
-		name: name,
+		token:      token,
+		model:      model,
+		FwVer:      fw,
+		support:    support,
+		Power:      power,
+		Bright:     bright,
+		ColorMode:  colorMode,
+		ColorTemp:  temp,
+		Rgb:        rgb,
+		Hue:        hue,
+		Sat:        sat,
+		Nam:        name,
 	}
 }
 
@@ -76,7 +76,7 @@ func (y *YeeLight) SetIP(ip string) error {
 
 		conn.SetReadDeadline(time.Now().Add(Timeout))
 		if n, err := y.GetProp([]Prop{"name"}); len(n) > 0 && err == nil {
-			y.name = string(n[0])
+			y.Nam = string(n[0])
 		}
 		return nil
 	} else {
@@ -84,7 +84,6 @@ func (y *YeeLight) SetIP(ip string) error {
 	}
 }
 
-// Not used
 func (y *YeeLight) Token() []byte {
 	return y.token
 }
@@ -94,12 +93,12 @@ func (y *YeeLight) Model() string {
 }
 
 func (y *YeeLight) Name() string {
-	if y.name == "" {
+	if y.Nam == "" {
 		if n, err := y.GetProp([]Prop{"name"}); len(n) > 0 && err == nil {
-			y.name = string(n[0])
+			y.Nam = string(n[0])
 		}
 	}
-	return y.name
+	return y.Nam
 }
 
 func (y *YeeLight) SetName(name string) error {
@@ -118,15 +117,15 @@ func (y *YeeLight) SetName(name string) error {
 		return ErrInvalidCommand
 	}
 
-	y.name = name
+	y.Nam = name
 
 	return nil
 }
 
 func (y *YeeLight) String() string {
-	return fmt.Sprintf("{type:%s, token:%s, id:%x, ip:%s, name:%s, model:%s, ver:%d, support:%v, power:%v, " +
-		"bright:%d, mode:%d, temp:%d, rgb:%d, hue:%d, sat:%v, counter:%d}", y.deviceType, string(y.token), y.id, y.ip,
-		y.name, y.model, y.fwVer, y.support, y.power, y.bright, y.colorMode, y.temp, y.rgb, y.hue, y.sat, y.counter)
+	return fmt.Sprintf("{type:\"%s\", id:%x, ip:\"%s\", name:\"%s\", model:\"%s\", ver:%d, support:\"%v\", power:\"%v\", "+
+		"bright:%d, colorMode:%d, temp:%d, rgb:%d, hue:%d, sat:%d}", y.deviceType, y.id, y.ip,
+		y.Nam, y.model, y.FwVer, y.support, y.Power, y.Bright, y.ColorMode, y.ColorTemp, y.Rgb, y.Hue, y.Sat)
 }
 
 func (y *YeeLight) Close() error {

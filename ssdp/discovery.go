@@ -112,15 +112,13 @@ func (d *Discovery) Listener(iface net.Interface, ifAddr string) error {
 			}
 		}
 		lines["ip"] = strings.Split(addr.String(), ":")[0]
-
 		d.Reporter <- lines
-
 	}
 }
 
 func (d *Discovery) notifier(conn *ipv4.PacketConn, addr *net.UDPAddr) {
 	for {
-		log.Printf("send notification")
+		log.Printf("send discovery request")
 
 		request := fmt.Sprintf("M-SEARCH * HTTP/1.1\r\nHOST: %s:%d\r\nMAN: \"%s\"\r\nST: %s\r\n",
 			ssdpDiscoveryAddr, ssdpDiscoveryPort, ssdpDiscoveryHeader, ssdpDiscoveryService)
@@ -128,6 +126,6 @@ func (d *Discovery) notifier(conn *ipv4.PacketConn, addr *net.UDPAddr) {
 		if _, err := conn.WriteTo([]byte(request), nil, addr); err != nil {
 			panic(err)
 		}
-		time.Sleep(60*time.Second)
+		time.Sleep(60 * time.Second)
 	}
 }

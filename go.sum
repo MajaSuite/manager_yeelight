@@ -1,8 +1,8 @@
-github.com/MajaSuite/mqtt v0.2.2 h1:Rh3t6ka4SxpWzyEL6MLC6p2Lf6OyX84URoYATum5hk8=
-github.com/MajaSuite/mqtt v0.2.2/go.mod h1:cbOCgbCswDWvmNAuLDpcnldqws/hMnX8N9fdiLDvvd8=
+github.com/MajaSuite/mqtt v0.2.3 h1:MMnLUmAC+arTutqJwM0z/6/ARMgZ4xiv2iJK/moeVR0=
+github.com/MajaSuite/mqtt v0.2.3/go.mod h1:cbOCgbCswDWvmNAuLDpcnldqws/hMnX8N9fdiLDvvd8=
 github.com/mattn/go-sqlite3 v1.14.5/go.mod h1:WVKg1VTActs4Qso6iwGbiFih2UIHo0ENGwNd0Lj+XmI=
-golang.org/x/net v0.0.0-20211123203042-d83791d6bcd9 h1:0qxwC5n+ttVOINCBeRHO0nq9X7uy8SDsPoi5OaCdIEI=
-golang.org/x/net v0.0.0-20211123203042-d83791d6bcd9/go.mod h1:9nx3DQGgdP8bBQD5qxJ1jj9UTztislL4KSBs9R2vV5Y=
+golang.org/x/net v0.0.0-20220107192237-5cfca573fb4d h1:62NvYBuaanGXR2ZOfwDFkhhl6X1DUgf8qg3GuQvxZsE=
+golang.org/x/net v0.0.0-20220107192237-5cfca573fb4d/go.mod h1:9nx3DQGgdP8bBQD5qxJ1jj9UTztislL4KSBs9R2vV5Y=
 golang.org/x/sys v0.0.0-20201119102817-f84b799fce68/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/sys v0.0.0-20210423082822-04245dca01da h1:b3NXsE2LusjYGGjL5bxEVZZORm/YEFFrWFjR8eFrw/c=
 golang.org/x/sys v0.0.0-20210423082822-04245dca01da/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=

@@ -10,6 +10,7 @@ var (
 	ErrInvalidCommand = errors.New("invalid command")
 	ErrWrongParameter = errors.New("invalid parameter")
 	ErrNotStarted     = errors.New("device not started")
+	ErrAlreadyStarted = errors.New("device already started")
 )
 
 type Effect string
@@ -88,34 +89,29 @@ const (
 	active_mode    Prop = "active_mode"    //0: daylight mode / 1: moonlight mode (ceiling light only)
 )
 
-type request struct {
-	Id     uint32      `json:"id"`
+type lanRequest struct {
+	Id     int         `json:"id"`
 	Method string      `json:"method"`
-	Params interface{} `json:"params"`
+	Params interface{} `json:"params,omitempty"`
 }
 
-func (r request) String() string {
+func (r lanRequest) String() string {
 	return fmt.Sprintf("{id:%d, method:%s, params:%s}", r.Id, r.Method, r.Params)
 }
 
-type response struct {
-	Id     uint32      `json:"id"`
-	Result []string    `json:"result,omitempty"`
-	Params *respParams `json:"params,omitempty"`
-	Error  *respError  `json:"error,omitempty"`
+type lanResponse struct {
+	Id     int        `json:"id"`
+	Result []string   `json:"result,omitempty"`
+	Error  *respError `json:"error,omitempty"`
 }
 
-func (r response) String() string {
-	var err string
+func (r lanResponse) String() string {
+	var e string
 	if r.Error != nil {
-		err = r.Error.String()
+		e = fmt.Sprintf(",\"error\":%s", r.Error.String())
 	}
-
-	var params string
-	if r.Params != nil {
-		err = r.Params.String()
-	}
-	return fmt.Sprintf("{id:%d, result:%s, params:%s, errror:%s}", r.Id, r.Result, params, err)
+	return fmt.Sprintf(`{"id":%d,"result":%v,"error":%s}`,
+		r.Id, r.Result, e)
 }
 
 type respError struct {
@@ -125,6 +121,11 @@ type respError struct {
 
 func (r respError) String() string {
 	return fmt.Sprintf("{code:%d, message:%s}", r.Code, r.Message)
+}
+
+type notification struct {
+	Method string      `json:"method"`
+	Params *respParams `json:"params"`
 }
 
 type respParams struct {
@@ -140,4 +141,26 @@ func (r respParams) String() string {
 	sb.WriteString("}")
 
 	return sb.String()
+}
+
+type DeviceJson struct {
+	StringId  string `json:"id"`
+	Id        uint32
+	Ip        string `json:"ip"`
+	Type      string `json:"type"`
+	Model     string `json:"model"`
+	Name      string `json:"name"`
+	Version   int    `json:"ver"`
+	Support   string `json:"support"`
+	Power     bool   `json:"power"`
+	Bright    int    `json:"bright"`
+	ColorMode int    `json:"mode"`
+	ColorTemp int    `json:"temp"`
+	Rgb       int    `json:"rgb"`
+	Hue       int    `json:"hue"`
+	Sat       int    `json:"sat"`
+	Cmd       string `json:"cmd"`
+	Value1    string `json:"value1"`
+	Value2    string `json:"value2"`
+	Value3    string `json:"value3"`
 }

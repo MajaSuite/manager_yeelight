@@ -6,8 +6,7 @@ import (
 )
 
 func ConvertHex(v string) uint32 {
-	cleaned := strings.Replace(v, "0x", "", -1)
-	res, _ := strconv.ParseUint(cleaned, 16, 64)
+	res, _ := strconv.ParseUint(strings.Replace(v, "0x", "", -1), 16, 64)
 	return uint32(res)
 }
 

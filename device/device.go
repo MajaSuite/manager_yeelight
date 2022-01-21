@@ -1,10 +1,22 @@
 package device
 
-import "time"
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"manager_yeelight/utils"
+	"net"
+	"strings"
+	"time"
+)
 
-const Timeout = 2 * time.Second
-
-type Type byte
+const (
+	connectTimeout = 5 * time.Second
+	yeeLightPort   = "55443"
+)
 
 const (
 	NO_TYPE Type = iota
@@ -19,6 +31,8 @@ const (
 	PLUG
 	FAN
 )
+
+type Type int
 
 func (t Type) String() string {
 	switch t {
@@ -46,17 +60,39 @@ func (t Type) String() string {
 	return "unknown"
 }
 
-type Device interface {
-	Type() Type
-	Id() uint32
-	Start(ip string, update chan Device) error
-	Close() error
-	Cmd(cmd string, v1 string, v2 string, v3 string) ([]string, error)
-	String() string
-	Support(v string)
+type Device struct {
+	Id        string          `json:"id"`
+	Ip        string          `json:"ip"`
+	Type      Type            `json:"type"`
+	Model     string          `json:"model"`
+	Name      string          `json:"name"`
+	Version   int             `json:"ver"`
+	Support   string          `json:"support"`
+	Power     bool            `json:"power"`
+	Bright    int             `json:"bright"`
+	ColorMode int             `json:"mode"`
+	ColorTemp int             `json:"temp"`
+	Rgb       int             `json:"rgb"`
+	Hue       int             `json:"hue"`
+	Sat       int             `json:"sat"`
+	Cmd       string          `json:"cmd,omitempty"`
+	Value1    string          `json:"value1,omitempty"`
+	Value2    string          `json:"value2,omitempty"`
+	Value3    string          `json:"value3,omitempty"`
+	support   map[string]bool `json:"-"`
+	conn      net.Conn        `json:"-"`
+	status    net.Conn        `json:"-"`
+	counter   int             `json:"-"`
 }
 
-func CheckDevice(model string) Type {
+func (d *Device) IsStarted() bool {
+	if d.counter > 0 {
+		return true
+	}
+	return false
+}
+
+func (d *Device) CheckDevice(model string) Type {
 	switch model {
 	case "ctmt1":
 		return CURTAIN
@@ -290,4 +326,266 @@ func CheckDevice(model string) Type {
 	}
 
 	return NO_TYPE
+}
+
+func (d *Device) ConvertSupport() error {
+	if d.Support == "" {
+		return fmt.Errorf("empty support array")
+	}
+
+	d.support = make(map[string]bool)
+	sp := strings.Split(d.Support, " ")
+	for _, v := range sp {
+		d.support[v] = true
+	}
+	return nil
+}
+
+func (d *Device) Run(method string, v1 string, v2 string, v3 string) ([]string, error) {
+	if d.counter == 0 {
+		return nil, ErrNotStarted
+	}
+
+	if !d.support[method] {
+		return nil, ErrInvalidCommand
+	}
+
+	var props = []string{}
+	if v1 != "" {
+		props = append(props, v1)
+	}
+	if v2 != "" {
+		props = append(props, v2)
+	}
+	if v3 != "" {
+		props = append(props, v3)
+	}
+
+	d.counter++
+	req := &lanRequest{Id: d.counter, Method: method, Params: props}
+	request, err := json.Marshal(&req)
+	if err != nil {
+		return nil, err
+	}
+
+	request = append(request, '\r')
+	request = append(request, '\n')
+
+	log.Println("lan request", strings.Trim(string(request), "\r\n"))
+
+	for x := 0; x < 5; x++ {
+		if _, err := d.conn.Write(request); err != nil {
+			log.Println("lan write", err)
+			if x > 5 {
+				break // too much tries, break it
+			}
+			time.Sleep(time.Second * 10)
+			d.conn, _ = net.DialTimeout("tcp", net.JoinHostPort(d.Ip, yeeLightPort), connectTimeout)
+			continue
+		}
+		break
+	}
+
+	response, err := bufio.NewReader(bufio.NewReader(d.conn)).ReadBytes('\n')
+	if err != nil {
+		log.Println("lan read", err)
+		return nil, err
+	}
+
+	log.Println("lan response", strings.Trim(string(response), "\r\n"))
+
+	var resp lanResponse
+	if err := json.Unmarshal(response, &resp); err != nil {
+		return nil, err
+	}
+
+	if resp.Id == d.counter {
+		if resp.Error != nil {
+			return nil, fmt.Errorf("lan error from device %s", resp.Error.Message)
+		}
+		if resp.Result != nil && len(resp.Result) > 0 {
+			return resp.Result, nil
+		}
+	} else {
+		response, err := bufio.NewReader(bufio.NewReader(d.conn)).ReadBytes('\n')
+		if err != nil {
+			return nil, err
+		}
+
+		log.Println("lan additional", strings.Trim(string(response), "\r\n"))
+		if err := json.Unmarshal(response, &resp); err != nil {
+			return nil, err
+		}
+		if resp.Result != nil && len(resp.Result) > 0 {
+			return resp.Result, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func (d *Device) String() string {
+	var support string
+	for v := range d.support {
+		if support == "" {
+			support = v
+		} else {
+			support = support + " " + v
+		}
+	}
+	return fmt.Sprintf(`{"id":"%s","ip":"%s","model":"%s","name":"%s","ver":%d,"support":"%v","power":%v,"bright":%d,"mode":%d,"temp":%d,"rgb":%d,"hue":%d,"sat":%d}`,
+		d.Id, d.Ip, d.Model, d.Name, d.Version, support, d.Power, d.Bright, d.ColorMode, d.ColorTemp, d.Rgb, d.Hue, d.Sat)
+}
+
+func (d *Device) Start(update chan *Device) error {
+	if d.conn != nil || d.counter > 0 {
+		return ErrAlreadyStarted
+	}
+
+	if d.Ip == "" {
+		return ErrIpUnknown
+	}
+
+	log.Printf("start device %s (%s)", d.Id, d.Ip)
+	d.counter++
+
+	// connect to device
+	go func() {
+		for d.counter > 0 {
+			conn, err := net.DialTimeout("tcp", net.JoinHostPort(d.Ip, yeeLightPort), connectTimeout)
+			if err == nil {
+				d.conn = conn
+
+				res, _ := d.Run("get_prop", "name", "", "")
+				if len(res) > 0 {
+					d.Name = res[0]
+				}
+
+				update <- d
+				return
+			}
+
+			time.Sleep(time.Second * 10)
+		}
+	}()
+
+	// read device status. separate connection
+	go func() {
+		log.Println("status thread connect", d.Ip)
+		d.status, _ = net.DialTimeout("tcp", net.JoinHostPort(d.Ip, yeeLightPort), connectTimeout)
+
+		for {
+			if d.status == nil {
+				log.Println("status thread reconnect", d.Ip)
+				status, err := net.DialTimeout("tcp", net.JoinHostPort(d.Ip, yeeLightPort), connectTimeout)
+				if err != nil {
+					time.Sleep(time.Second * 10)
+					continue
+				}
+				d.status = status
+			}
+
+			response, err := bufio.NewReader(bufio.NewReader(d.status)).ReadBytes('\n')
+			if err != nil {
+				log.Println("status connection", d.Ip, err)
+				d.status = nil
+				time.Sleep(time.Second * 10)
+				continue
+			}
+
+			var resp lanRequest
+			if err := json.Unmarshal(response, &resp); err != nil {
+				log.Printf("error unmarshall notification record (%v)", err)
+				continue
+			}
+			log.Println("new notification", string(response))
+
+			if resp.Method == "props" {
+				for k, v := range resp.Params.(map[string]interface{}) {
+					switch k {
+					case "power":
+						d.Power = utils.ConvertBool(v.(string))
+						update <- d
+					case "name":
+						d.Name = v.(string)
+						update <- d
+					case "hue":
+						d.Hue = v.(int)
+						update <- d
+					case "sat":
+						d.Sat = v.(int)
+						update <- d
+					case "rgb":
+						d.Rgb = v.(int)
+						update <- d
+					case "color_mode":
+						d.ColorMode = v.(int)
+						update <- d
+					case "ct":
+						d.ColorTemp = v.(int)
+						update <- d
+					case "bright":
+						d.Bright = v.(int)
+						update <- d
+						// todo some extra also may exists
+						// i.e. {"flow_params":"0,1,3000,1,16711680,100,3000,1,65280,100,3000,1,255,100,3000,1,9055202,100","flowing":1}
+					}
+				}
+			}
+		}
+	}()
+
+	return nil
+}
+
+func (d *Device) Close() error {
+	return d.conn.Close()
+}
+
+func NewDevice(buf *bytes.Buffer, addr net.Addr) *Device {
+	device := &Device{
+		Ip: strings.Split(addr.String(), ":")[0],
+	}
+
+	for {
+		chunk, err := buf.ReadBytes('\n')
+		if err == io.EOF {
+			break
+		}
+
+		line := strings.Split(string(chunk), ": ")
+		if len(line) >= 2 {
+			v := strings.Trim(string(chunk)[len(line[0])+1:], " \r\n")
+			switch line[0] {
+			case "id":
+				device.Id = strings.TrimLeft(strings.Replace(v, "0x", "", -1), "0")
+			case "model":
+				device.Model = v
+				device.Type = device.CheckDevice(v)
+			case "name":
+				device.Name = v
+			case "fw_ver":
+				device.Version = utils.ConvertInt(v)
+			case "power":
+				device.Power = utils.ConvertBool(v)
+			case "bright":
+				device.Bright = utils.ConvertInt(v)
+			case "color_mode":
+				device.ColorMode = utils.ConvertInt(v)
+			case "ct":
+				device.ColorTemp = utils.ConvertInt(v)
+			case "rgb":
+				device.Rgb = utils.ConvertInt(v)
+			case "hue":
+				device.Hue = utils.ConvertInt(v)
+			case "sat":
+				device.Sat = utils.ConvertInt(v)
+			case "support":
+				device.Support = v
+				device.ConvertSupport()
+			}
+		}
+	}
+
+	return device
 }

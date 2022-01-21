@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"golang.org/x/net/ipv4"
-	"io"
 	"log"
+	"manager_yeelight/device"
 	"net"
 	"strings"
 	"time"
@@ -19,15 +19,33 @@ const (
 )
 
 type Discovery struct {
-	Reporter chan map[string]string
+	Reporter chan *device.Device
 }
 
 func NewDiscovery() *Discovery {
 	log.Println("Start discovery")
 
 	d := &Discovery{
-		Reporter: make(chan map[string]string),
+		Reporter: make(chan *device.Device),
 	}
+
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	if err != nil {
+		panic(err)
+	}
+
+	pkt := ipv4.NewPacketConn(conn)
+
+	addr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf("%s:%d", ssdpDiscoveryAddr, ssdpDiscoveryPort))
+	if err != nil {
+		panic(err)
+	}
+
+	mconn, err := net.ListenMulticastUDP("udp4", nil, addr)
+	if err != nil {
+		return nil
+	}
+	mpkt := ipv4.NewPacketConn(mconn)
 
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -40,56 +58,34 @@ func NewDiscovery() *Discovery {
 			return nil
 		}
 
-		for _, addr := range ifAddr {
+		for _, ifaddr := range ifAddr {
 			// skip ipv6
-			if strings.Contains(addr.String(), "::") {
+			if strings.Contains(ifaddr.String(), "::") {
 				continue
 			}
 
 			// skip localhost
-			if strings.Contains(addr.String(), "127.0.0.1") {
+			if strings.Contains(ifaddr.String(), "127.0.0.1") {
 				continue
 			}
 
-			ifAddr := strings.Split(addr.String(), "/")
+			log.Printf("listen on interface %s", iface.Name)
+			if err := pkt.JoinGroup(&iface, &net.UDPAddr{IP: net.ParseIP(ssdpDiscoveryAddr)}); err != nil {
+				log.Println("join error", err)
+			}
 
-			go d.Listener(iface, ifAddr[0])
+			go d.notifier(mpkt, addr)
+			go d.Listener(mpkt)
 		}
 	}
 
 	return d
 }
 
-func (d *Discovery) Listener(iface net.Interface, ifAddr string) error {
-	log.Printf("listen on %s interface with ip %s", iface.Name, ifAddr)
-	addr, err := net.ResolveUDPAddr("udp4",
-		fmt.Sprintf("%s:%d", ssdpDiscoveryAddr, ssdpDiscoveryPort))
-	if err != nil {
-		return err
-	}
-
-	conn, err := net.ListenPacket("udp4", fmt.Sprintf("%s:%d", "0.0.0.0", ssdpDiscoveryPort))
-	if err != nil {
-		return err
-		panic(err)
-	}
-
-	mcConn := ipv4.NewPacketConn(conn)
-	if err := mcConn.JoinGroup(&iface, addr); err != nil {
-		panic(err)
-	}
-	if err := mcConn.SetMulticastLoopback(false); err != nil {
-		panic(err)
-	}
-	if err := mcConn.SetControlMessage(ipv4.FlagDst, true); err != nil {
-		panic(err)
-	}
-
-	go d.notifier(mcConn, addr)
-
+func (d *Discovery) Listener(mconn *ipv4.PacketConn) error {
 	for {
 		buffer := make([]byte, 0x2048)
-		_, _, addr, err := mcConn.ReadFrom(buffer)
+		_, _, addr, err := mconn.ReadFrom(buffer)
 		if err != nil {
 			panic(err)
 		}
@@ -99,20 +95,9 @@ func (d *Discovery) Listener(iface net.Interface, ifAddr string) error {
 			continue
 		}
 
-		lines := make(map[string]string)
-		for {
-			chunk, err := buf.ReadBytes('\n')
-			if err == io.EOF {
-				break
-			}
+		device := device.NewDevice(buf, addr)
 
-			line := strings.Split(string(chunk), ": ")
-			if len(line) >= 2 {
-				lines[line[0]] = strings.Trim(string(chunk)[len(line[0])+1:], " \r\n")
-			}
-		}
-		lines["ip"] = strings.Split(addr.String(), ":")[0]
-		d.Reporter <- lines
+		d.Reporter <- device
 	}
 }
 

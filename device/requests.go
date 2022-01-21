@@ -3,13 +3,13 @@ package device
 import (
 	"errors"
 	"fmt"
-	"strings"
 )
 
 var (
 	ErrInvalidCommand = errors.New("invalid command")
 	ErrWrongParameter = errors.New("invalid parameter")
 	ErrNotStarted     = errors.New("device not started")
+	ErrIpUnknown      = errors.New("device ip address unknown")
 	ErrAlreadyStarted = errors.New("device already started")
 )
 
@@ -121,46 +121,4 @@ type respError struct {
 
 func (r respError) String() string {
 	return fmt.Sprintf("{code:%d, message:%s}", r.Code, r.Message)
-}
-
-type notification struct {
-	Method string      `json:"method"`
-	Params *respParams `json:"params"`
-}
-
-type respParams struct {
-	Power string `json:"power,omitempty"`
-}
-
-func (r respParams) String() string {
-	var sb strings.Builder
-	sb.WriteString("{")
-	if r.Power != "" {
-		sb.WriteString("power:" + r.Power + " ")
-	}
-	sb.WriteString("}")
-
-	return sb.String()
-}
-
-type DeviceJson struct {
-	StringId  string `json:"id"`
-	Id        uint32
-	Ip        string `json:"ip"`
-	Type      string `json:"type"`
-	Model     string `json:"model"`
-	Name      string `json:"name"`
-	Version   int    `json:"ver"`
-	Support   string `json:"support"`
-	Power     bool   `json:"power"`
-	Bright    int    `json:"bright"`
-	ColorMode int    `json:"mode"`
-	ColorTemp int    `json:"temp"`
-	Rgb       int    `json:"rgb"`
-	Hue       int    `json:"hue"`
-	Sat       int    `json:"sat"`
-	Cmd       string `json:"cmd"`
-	Value1    string `json:"value1"`
-	Value2    string `json:"value2"`
-	Value3    string `json:"value3"`
 }

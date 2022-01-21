@@ -9,7 +9,6 @@ import (
 	"log"
 	"manager_yeelight/device"
 	"manager_yeelight/ssdp"
-	"manager_yeelight/utils"
 	"strings"
 	"time"
 )
@@ -26,9 +25,11 @@ var (
 func main() {
 	flag.Parse()
 
+	log.Println("starting manager_yeelight ...")
+
 	// connect to mqtt
 	log.Println("try connect to mqtt")
-	var id uint16 = 1
+	var mqttid uint16 = 1
 	mqtt, err := transport.Connect(*srv, *clientid, uint16(*keepalive), *login, *pass, *debug)
 	if err != nil {
 		panic("can't connect to mqtt server " + err.Error())
@@ -37,65 +38,47 @@ func main() {
 
 	log.Println("subscribe to managed topics")
 	sp := packet.NewSubscribe()
-	sp.Id = 1
+	sp.Id = mqttid
 	sp.Topics = []packet.SubscribePayload{{Topic: "yeelight/#", QoS: 1}}
 	mqtt.Sendout <- sp
+	mqttid++
 
-	devices := make(map[uint32]device.Device)
-
-	// receive updates from devices
-	update := make(chan device.Device)
-	go func() {
-		for {
-			for dev := range update {
-				log.Println("update device", dev)
-				p := packet.NewPublish()
-				id++
-				p.Id = id
-				p.Topic = fmt.Sprintf("yeelight/%x", dev.Id())
-				p.QoS = 1
-				p.Payload = dev.String()
-				mqtt.Sendout <- p
-			}
-		}
-	}()
+	devices := make(map[string]*device.Device)
+	updates := make(chan *device.Device)
 
 	// fetch command data from mqtt server
 	go func() {
 		for {
 			for pkt := range mqtt.Broker {
 				if pkt.Type() == packet.PUBLISH {
-					var dev device.DeviceJson
-					topics := strings.Split(pkt.(*packet.PublishPacket).Topic, "/")
-					if err := json.Unmarshal([]byte(pkt.(*packet.PublishPacket).Payload), &dev); err == nil {
-						dev.Id = utils.ConvertHex(dev.StringId)
-						if dev.Cmd != "" {
-							// process command from hub
-							devliceId := utils.ConvertHex(topics[1])
-							log.Printf("run command %s (%s %s %s) for device: %x", dev.Cmd, dev.Value1, dev.Value2,
-								dev.Value3, devliceId)
+					var d device.Device
 
-							if devices[devliceId] != nil {
-								devices[devliceId].Cmd(dev.Cmd, dev.Value1, dev.Value2, dev.Value3)
+					topics := strings.Split(pkt.(*packet.PublishPacket).Topic, "/")
+					if err := json.Unmarshal([]byte(pkt.(*packet.PublishPacket).Payload), &d); err == nil {
+						if d.Cmd != "" {
+							// process command from hub
+							if devices[topics[1]] != nil {
+								if res, err := devices[topics[1]].Run(d.Cmd, d.Value1, d.Value2, d.Value3); err != nil {
+									log.Println("error run command", err)
+								} else {
+									// send results back to mqtt server
+									log.Println("run command result", res)
+								}
 							}
 						} else {
 							// restore devices from mqtt
-							if devices[dev.Id] == nil {
-								log.Printf("restore device %x", dev.Id)
-								d := device.NewYeeLight(dev.Id, dev.Model, dev.Name, dev.Support)
-								d.Version = dev.Version
-								d.Power = dev.Power
-								d.Bright = dev.Bright
-								d.ColorMode = dev.ColorMode
-								d.ColorTemp = dev.ColorTemp
-								d.Rgb = dev.Rgb
-								d.Hue = dev.Hue
-								d.Sat = dev.Sat
-								devices[dev.Id] = d
+							if devices[topics[1]] == nil {
+								log.Printf("restore device %s", topics[1])
+								d.Type = d.CheckDevice(d.Model)
+								d.ConvertSupport()
+								devices[topics[1]] = &d
+
+								// we don't know real ip address of this device, so we can't start it.
 							}
 						}
 					} else {
-						log.Println(err)
+						// unmarshall error (probably should not been here
+						log.Println("unmarshall error ", err)
 					}
 				}
 			}
@@ -104,43 +87,41 @@ func main() {
 
 	time.Sleep(3 * time.Second)
 
+	// receive updates from devices
+	go func() {
+		for {
+			for d := range updates {
+				log.Printf("device %s state changed: %s", d.Id, d.String())
+				p := packet.NewPublish()
+				p.Id = mqttid
+				p.Topic = fmt.Sprintf("yeelight/%s", d.Id)
+				p.QoS = 1
+				p.Payload = d.String()
+				mqtt.Sendout <- p
+				mqttid++
+			}
+		}
+	}()
+
 	// start device discovery
 	discovery := ssdp.NewDiscovery()
+	for d := range discovery.Reporter {
+		if devices[d.Id] == nil {
+			log.Printf("new device: %s", d.String())
+			d.Start(updates)
 
-	for lines := range discovery.Reporter {
-		deviceId := utils.ConvertHex(lines["id"])
-		if devices[deviceId] == nil {
-			dev := device.CreateDevice(lines)
-			if dev != nil {
-				dev.Start(lines["ip"], update)
-				devices[deviceId] = dev
-
-				log.Printf("new device: %s", dev.String())
-
-				p := packet.NewPublish()
-				id++
-				p.Id = id
-				p.Topic = fmt.Sprintf("yeelight/%x", dev.Id())
-				p.QoS = 1
-				p.Payload = dev.String()
-				p.Retain = true
-				mqtt.Sendout <- p
-			} else {
-				log.Printf("unknown device: %s (%s) at %s", lines["type"], lines["model"], lines["ip"])
-			}
+			p := packet.NewPublish()
+			p.Id = mqttid
+			p.Topic = fmt.Sprintf("yeelight/%s", d.Id)
+			p.QoS = 1
+			p.Payload = fmt.Sprintf(`{"id":"%s","model":"%s","name":"%s","ver":%d}`, d.Id, d.Model, d.Name, d.Version)
+			p.Retain = true
+			mqtt.Sendout <- p
+			mqttid++
 		} else {
-			dev := devices[deviceId]
-			if err := dev.Start(lines["ip"], update); err != device.ErrAlreadyStarted {
-				log.Printf("start device: %s", dev.String())
-				//if err := device.UpdateDevice(dev, lines); err != nil {
-				//	p := packet.NewPublish()
-				//	id++
-				//	p.Id = id
-				//	p.Topic = fmt.Sprintf("yeelight/%x", dev.Id())
-				//	p.QoS = 1
-				//	p.Payload = dev.String()
-				//	mqtt.Sendout <- p
-				//}
+			if !devices[d.Id].IsStarted() {
+				devices[d.Id] = d
+				d.Start(updates)
 			}
 		}
 	}

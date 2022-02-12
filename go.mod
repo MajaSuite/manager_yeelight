@@ -3,7 +3,7 @@ module manager_yeelight
 go 1.17
 
 require (
-	github.com/MajaSuite/mqtt v0.2.3
+	github.com/MajaSuite/mqtt v0.2.6
 	golang.org/x/net v0.0.0-20220107192237-5cfca573fb4d
 )
 

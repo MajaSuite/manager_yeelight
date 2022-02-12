@@ -28,3 +28,27 @@ func ConvertInt(v string) int {
 		return i
 	}
 }
+
+func ConvertToString(msg map[string]interface{}, k string) string {
+	switch msg[k].(type) {
+	case string:
+		return msg[k].(string)
+	}
+	return ""
+}
+
+func ConvertToInt(msg map[string]interface{}, k string) int {
+	switch msg[k].(type) {
+	case float64:
+		return int(msg[k].(float64))
+	}
+	return 0
+}
+
+func ConvertToBool(msg map[string]interface{}, k string) bool {
+	switch msg[k].(type) {
+	case bool:
+		return msg[k].(bool)
+	}
+	return false
+}

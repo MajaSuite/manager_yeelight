@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/MajaSuite/mqtt/client"
 	"github.com/MajaSuite/mqtt/packet"
-	"github.com/MajaSuite/mqtt/transport"
 	"log"
 	"manager_yeelight/device"
 	"manager_yeelight/ssdp"
+	"manager_yeelight/utils"
 	"strings"
-	"time"
 )
 
 var (
@@ -20,109 +20,182 @@ var (
 	login     = flag.String("login", "", "login string for mqtt server")
 	pass      = flag.String("pass", "", "password string for mqtt server")
 	debug     = flag.Bool("debug", false, "print debuging hex dumps")
+	qos       = flag.Int("qos", 0, "qos to send/receive from mqtt")
 )
 
 func main() {
 	flag.Parse()
 
-	log.Println("starting manager_yeelight ...")
+	log.Println("starting manager_yeelight")
 
 	// connect to mqtt
 	log.Println("try connect to mqtt")
-	var mqttid uint16 = 1
-	mqtt, err := transport.Connect(*srv, *clientid, uint16(*keepalive), *login, *pass, *debug)
+	var mqttId uint16 = 1
+	mqtt, err := client.Connect(*srv, *clientid, uint16(*keepalive), false, *login, *pass /* *debug */, false)
 	if err != nil {
-		panic("can't connect to mqtt server " + err.Error())
+		panic("can't connect to mqtt server ")
 	}
-	go mqtt.Start()
 
 	log.Println("subscribe to managed topics")
 	sp := packet.NewSubscribe()
-	sp.Id = mqttid
-	sp.Topics = []packet.SubscribePayload{{Topic: "yeelight/#", QoS: 1}}
-	mqtt.Sendout <- sp
-	mqttid++
+	sp.Id = mqttId
+	sp.Topics = []packet.SubscribePayload{{Topic: "yeelight/#", QoS: packet.QoS(*qos)}}
+	mqtt.Send <- sp
+	mqttId++
 
-	devices := make(map[string]*device.Device)
-	updates := make(chan *device.Device)
+	log.Println("start yeelight discovery")
+	discovery := make(chan device.Device)
+	go ssdp.NewDiscovery(*debug, discovery)
 
-	// fetch command data from mqtt server
-	go func() {
-		for {
-			for pkt := range mqtt.Broker {
-				if pkt.Type() == packet.PUBLISH {
-					var d device.Device
+	// main cycle
+	devices := make(map[string]device.Device)
 
-					topics := strings.Split(pkt.(*packet.PublishPacket).Topic, "/")
-					if err := json.Unmarshal([]byte(pkt.(*packet.PublishPacket).Payload), &d); err == nil {
-						if d.Cmd != "" {
-							// process command from hub
-							if devices[topics[1]] != nil {
-								if res, err := devices[topics[1]].Run(d.Cmd, d.Value1, d.Value2, d.Value3); err != nil {
-									log.Println("error run command", err)
-								} else {
-									// send results back to mqtt server
-									log.Println("run command result", res)
-								}
+	for {
+		select {
+		case pkt := <-mqtt.Receive:
+			if pkt.Type() == packet.PUBLISH {
+				topics := strings.Split(pkt.(*packet.PublishPacket).Topic, "/")
+				var msg map[string]interface{}
+				if err := json.Unmarshal([]byte(pkt.(*packet.PublishPacket).Payload), &msg); err == nil {
+					dev := device.CreateDevice(*debug, utils.ConvertToString(msg, "model"), topics[1], "",
+						utils.ConvertToString(msg, "name"), utils.ConvertToString(msg, "support"),
+						utils.ConvertToBool(msg, "power"), utils.ConvertToInt(msg, "ver"),
+						utils.ConvertToInt(msg, "bright"), utils.ConvertToInt(msg, "mode"),
+						utils.ConvertToInt(msg, "temp"), utils.ConvertToInt(msg, "rgb"),
+						utils.ConvertToInt(msg, "hue"), utils.ConvertToInt(msg, "sat"))
+
+					if dev != nil {
+						if devices[topics[1]] == nil {
+							devices[dev.ID()] = dev
+
+							if *debug {
+								log.Println("new from mqtt", dev)
 							}
 						} else {
-							// restore devices from mqtt
-							if devices[topics[1]] == nil {
-								log.Printf("restore device %s", topics[1])
-								d.Type = d.CheckDevice(d.Model)
-								d.ConvertSupport()
-								devices[topics[1]] = &d
+							method := utils.ConvertToString(msg, "method")
+							effect := utils.ConvertToString(msg, "effect")
+							duration := utils.ConvertToString(msg, "duration")
 
-								// we don't know real ip address of this device, so we can't start it.
+							if method != "" {
+								res, err := devices[topics[1]].Run(method, []string{effect, duration})
+								if err != nil {
+									log.Printf("error run %s: %v", method, err)
+								}
+
+								if *debug {
+									log.Printf("run %s result %v", method, res)
+								}
+							} else {
+								switch dev.Type() {
+								case device.LIGHT_DEVICE:
+									d := dev.(*device.LightDevice)
+									orig := devices[topics[1]].(*device.LightDevice)
+									if orig.Name != d.Name {
+										res, err := dev.Run("set_name", []string{d.Name})
+										if err != nil {
+											log.Printf("error run %s: %v", "set_name", err)
+										}
+										if *debug {
+											log.Printf("run %s result %v", "set_name", res)
+										}
+									}
+									if orig.Power != d.Power {
+										state := "on"
+										if d.Power == false {
+											state = "off"
+										}
+										res, err := dev.Run("set_power", []string{state, effect, duration, "0"})
+										if err != nil {
+											log.Printf("error run %s: %v", "set_name", err)
+										}
+										if *debug {
+											log.Printf("run %s result %v", "set_name", res)
+										}
+									}
+									if orig.Version != d.Version {
+										//
+									}
+									if orig.Bright != d.Bright {
+										//
+									}
+									if orig.ColorMode != d.ColorMode {
+										//
+									}
+									if orig.ColorTemp != d.ColorTemp {
+										//
+									}
+								case device.RGB_DEVICE:
+									//
+								case device.AMBILIGHT_DEVICE:
+									//
+								default:
+									log.Println("unknown device, can't change state")
+								}
 							}
 						}
-					} else {
-						// unmarshall error (probably should not been here
-						log.Println("unmarshall error ", err)
 					}
+				} else {
+					log.Println("mqtt message unmarshall error ", err)
 				}
 			}
-		}
-	}()
 
-	time.Sleep(3 * time.Second)
-
-	// receive updates from devices
-	go func() {
-		for {
-			for d := range updates {
-				log.Printf("device %s state changed: %s", d.Id, d.String())
-				p := packet.NewPublish()
-				p.Id = mqttid
-				p.Topic = fmt.Sprintf("yeelight/%s", d.Id)
-				p.QoS = 1
-				p.Payload = d.String()
-				mqtt.Sendout <- p
-				mqttid++
+		case dev := <-discovery:
+			if dev == nil || dev.Type() == device.NO_TYPE { // undefined (...and unsupported) device
+				continue
 			}
-		}
-	}()
-
-	// start device discovery
-	discovery := ssdp.NewDiscovery()
-	for d := range discovery.Reporter {
-		if devices[d.Id] == nil {
-			log.Printf("new device: %s", d.String())
-			d.Start(updates)
 
 			p := packet.NewPublish()
-			p.Id = mqttid
-			p.Topic = fmt.Sprintf("yeelight/%s", d.Id)
-			p.QoS = 1
-			p.Payload = fmt.Sprintf(`{"id":"%s","model":"%s","name":"%s","ver":%d}`, d.Id, d.Model, d.Name, d.Version)
-			p.Retain = true
-			mqtt.Sendout <- p
-			mqttid++
-		} else {
-			if !devices[d.Id].IsStarted() {
-				devices[d.Id] = d
-				d.Start(updates)
+			p.Id = mqttId
+			p.Topic = fmt.Sprintf("yeelight/%s", dev.ID())
+			p.QoS = packet.QoS(*qos)
+			mqttId++
+
+			if devices[dev.ID()] == nil {
+				if *debug {
+					log.Println("new device from discovery", dev.Retain())
+				}
+				dev.Connect(dev.IP(), discovery)
+				devices[dev.ID()] = dev
+				p.Retain = true
+				p.Payload = dev.Retain()
+			} else {
+				if devices[dev.ID()].IP() == "" {
+					devices[dev.ID()].Connect(dev.IP(), discovery)
+				}
+
+				switch dev.Type() {
+				case device.LIGHT_DEVICE:
+					d := devices[dev.ID()].(*device.LightDevice)
+					orig := devices[dev.ID()].(*device.LightDevice)
+					orig.Name = d.Name
+					orig.Support = d.Support
+					orig.ConvertSupport(d.Support)
+					orig.Power = d.Power
+					orig.Version = d.Version
+					orig.Bright = d.Bright
+					orig.ColorMode = d.ColorMode
+					orig.ColorTemp = d.ColorTemp
+				case device.RGB_DEVICE:
+					d := devices[dev.ID()].(*device.RgbDevice)
+					orig := devices[dev.ID()].(*device.RgbDevice)
+					orig.Name = d.Name
+					orig.Support = d.Support
+					orig.ConvertSupport(d.Support)
+					orig.Power = d.Power
+					orig.Version = d.Version
+					orig.Bright = d.Bright
+					orig.ColorMode = d.ColorMode
+					orig.ColorTemp = d.ColorTemp
+					orig.Rgb = d.Rgb
+					orig.Hue = d.Hue
+					orig.Sat = d.Sat
+				case device.AMBILIGHT_DEVICE:
+					//
+				}
+				p.Payload = dev.String()
 			}
+
+			mqtt.Send <- p
 		}
 	}
 }

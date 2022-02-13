@@ -1,6 +1,7 @@
 package device
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -20,10 +21,9 @@ type YeelightDevice struct {
 	Power       bool            `json:"power"`
 	support     map[string]bool `json:"-"`
 	debug       bool            `json:"-"`
-	//status      net.Conn        `json:"-"`
-	Method   string `json:"method,omitempty"`
-	Effect   string `json:"effect,omitempty"`
-	Duration string `json:"duration,omitempty"`
+	Method      string          `json:"method,omitempty"`
+	Effect      string          `json:"effect,omitempty"`
+	Duration    int             `json:"duration,omitempty"`
 }
 
 func NewYeeLightDevice(debug bool, model string, id string, ip string, name string, support string, power bool,
@@ -42,6 +42,40 @@ func NewYeeLightDevice(debug bool, model string, id string, ip string, name stri
 	d.ConvertSupport(support)
 
 	return d
+}
+
+func readResponse(debug bool, conn net.Conn, id int) ([]string, error) {
+	//	conn.SetReadDeadline(time.Now().Add(time.Second * 10))
+	response, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil {
+		if debug {
+			log.Println("lan read", err)
+		}
+		return nil, err
+	}
+
+	log.Println("run lan response", strings.Trim(string(response), "\r\n"))
+
+	var resp lanResponse
+	if err := json.Unmarshal(response, &resp); err != nil {
+		if debug {
+			log.Println("lan error unmarshal message", err)
+		}
+		return nil, err
+	}
+
+	if resp.Id == id {
+		if resp.Error != nil {
+			return nil, fmt.Errorf("lan error from device %s", resp.Error.Message)
+		}
+		if resp.Result != nil && len(resp.Result) > 0 {
+			return resp.Result, nil
+		}
+	} else {
+		return readResponse(debug, conn, id)
+	}
+
+	return nil, ErrWrongParameter
 }
 
 func (d *YeelightDevice) Type() Type {
@@ -74,7 +108,6 @@ func (d *YeelightDevice) ConvertSupport(support string) error {
 }
 
 func (d *YeelightDevice) Close() error {
-	//return d.status.Close()
 	d.Ip = ""
 	return nil
 }
@@ -89,74 +122,25 @@ func (d *YeelightDevice) Retain() string {
 		d.deviceType, d.deviceModel, d.Id, d.Name, d.Support, d.Version)
 }
 
-func (d *YeelightDevice) Connect(ip string, update chan Device) error {
+func (d *YeelightDevice) SetIP(ip string) error {
+	if ip == "" {
+		return ErrIpUnknown
+	}
+
 	if d.Ip != "" {
 		if d.debug {
-			log.Printf("%s allready connected (%s)", d.Id, d.IP())
+			log.Printf("%s allready have ip (%s)", d.Id, d.IP())
 		}
 		return ErrAlreadyStarted
 	}
 
 	d.Ip = ip
-	if d.debug {
-		log.Printf("start device %s (%s)", d.Id, d.Ip)
-	}
-
-	//go func() {
-	//	for {
-	//		if d.debug {
-	//			log.Println("connect for notifications")
-	//		}
-	//
-	//		var err error
-	//		if d.status, err = net.DialTimeout("tcp", net.JoinHostPort(d.Ip, yeeLightPort), connectTimeout); err != nil {
-	//			time.Sleep(time.Second * 5)
-	//			continue
-	//		}
-	//
-	//		for {
-	//			d.status.SetReadDeadline(time.Now().Add(time.Second * 10))
-	//			if line, err := bufio.NewReader(d.status).ReadBytes('\n'); err == nil && len(line) > 0 {
-	//				if d.debug {
-	//					log.Println("new message from device", strings.Trim(string(line), "\r\n"))
-	//				}
-	//
-	//				var resp lanRequest
-	//				if err := json.Unmarshal(line, &resp); err != nil {
-	//					log.Println("error unmarshal message", err)
-	//					continue
-	//				}
-	//
-	//				//log.Println(resp.Params)
-	//				// update <- message
-	//
-	//				continue
-	//			}
-	//
-	//			d.status.SetWriteDeadline(time.Now().Add(time.Second * 2))
-	//			if _, err := d.status.Write([]byte("\n")); err != nil {
-	//				d.status.Close()
-	//				break
-	//			}
-	//		}
-	//	}
-	//}()
-
-	res, err := d.Run("get_prop", []string{"name"})
-	if err == nil && len(res) > 0 {
-		d.Name = res[0]
-		// todo update it?
-	}
-
-	if err != nil {
-		return err
-	}
 
 	return nil
 }
 
-func (d *YeelightDevice) Run(method string, props []string) ([]string, error) {
-	if /*d.status == nil ||*/ d.IP() == "" {
+func (d *YeelightDevice) Run(method string, props []interface{}) ([]string, error) {
+	if d.IP() == "" {
 		return nil, ErrNotStarted
 	}
 
@@ -210,4 +194,14 @@ func (d *YeelightDevice) Run(method string, props []string) ([]string, error) {
 	}
 
 	return readResponse(d.debug, conn, id)
+}
+
+func (d *YeelightDevice) CompareAndUpdate(dev *Device) error {
+	// nothing to do here
+	return nil
+}
+
+func (d *YeelightDevice) RunMethod(dev *Device, method string, effect string, duration int) error {
+	// do nothing here
+	return nil
 }

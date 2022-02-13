@@ -6,13 +6,20 @@ import (
 )
 
 const (
-	connectTimeout = 2 * time.Second
-	yeeLightPort   = "55443"
+	connectTimeout        = 2 * time.Second
+	yeeLightPort          = "55443"
+	defaultEffect         = Smooth
+	defaultEffectDuration = 3
 )
 
 var (
-	ErrEmptyString = errors.New("empty string")
-	ErrCantConnect = errors.New("can't connect to device")
+	ErrEmptyString    = errors.New("empty string")
+	ErrCantConnect    = errors.New("can't connect to device")
+	ErrInvalidCommand = errors.New("invalid command")
+	ErrWrongParameter = errors.New("invalid parameter")
+	ErrNotStarted     = errors.New("device not started")
+	ErrIpUnknown      = errors.New("device ip address unknown")
+	ErrAlreadyStarted = errors.New("device already started")
 )
 
 const (
@@ -29,8 +36,10 @@ type Device interface {
 	Model() string
 	ID() string
 	IP() string
-	Connect(ip string, update chan Device) error
-	Run(method string, props []string) ([]string, error)
+	SetIP(ip string) error
+	Run(method string, props []interface{}) ([]string, error)
+	CompareAndUpdate(dev *Device) error
+	RunMethod(dev *Device, method string, effect string, duration int) error
 	Close() error
 	String() string
 	Retain() string
@@ -42,6 +51,8 @@ func (t Type) String() string {
 		return "Light"
 	case RGB_DEVICE:
 		return "RGB light"
+	case AMBILIGHT_DEVICE:
+		return "Light with ambilight"
 	}
 	return "unknown"
 }
@@ -281,4 +292,22 @@ func CheckDevice(model string) Type {
 	}
 
 	return NO_TYPE
+}
+
+/* Create device using sets of values
+ */
+func CreateDevice(debug bool, model string, id string, ip string, name string, support string, power bool, ver int,
+	bright int, mode int, temp int, rgb int, hue int, sat int) Device {
+	var dev Device
+
+	switch CheckDevice(model) {
+	case RGB_DEVICE:
+		dev = NewRgbDevice(debug, model, id, ip, name, support, power, ver, bright, mode, temp, rgb, hue, sat)
+	case LIGHT_DEVICE:
+		dev = NewLightDevice(debug, model, id, ip, name, support, power, ver, bright, mode, temp)
+	case AMBILIGHT_DEVICE:
+		// todo
+	}
+
+	return dev
 }

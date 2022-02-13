@@ -47,7 +47,6 @@ func main() {
 	discovery := make(chan device.Device)
 	go ssdp.NewDiscovery(*debug, discovery)
 
-	// main cycle
 	devices := make(map[string]device.Device)
 
 	for {
@@ -72,62 +71,48 @@ func main() {
 								log.Println("new from mqtt", dev)
 							}
 						} else {
-							method := utils.ConvertToString(msg, "method")
-							effect := utils.ConvertToString(msg, "effect")
-							duration := utils.ConvertToString(msg, "duration")
+							p := packet.NewPublish()
+							p.Id = mqttId
+							p.Topic = fmt.Sprintf("yeelight/%s", dev.ID())
+							p.QoS = packet.QoS(*qos)
+							mqttId++
 
+							method := utils.ConvertToString(msg, "method")
 							if method != "" {
-								res, err := devices[topics[1]].Run(method, []string{effect, duration})
-								if err != nil {
-									log.Printf("error run %s: %v", method, err)
+								log.Println("run direct command for", topics[1])
+								switch dev.Type() {
+								case device.LIGHT_DEVICE:
+									err = devices[topics[1]].(*device.LightDevice).RunMethod(&dev, method,
+										utils.ConvertToString(msg, "effect"), utils.ConvertToInt(msg, "duration"))
+									p.Payload = devices[topics[1]].(*device.LightDevice).String()
+								case device.RGB_DEVICE:
+									err = devices[topics[1]].(*device.RgbDevice).RunMethod(&dev, method,
+										utils.ConvertToString(msg, "effect"), utils.ConvertToInt(msg, "duration"))
+									p.Payload = devices[topics[1]].(*device.RgbDevice).String()
+								case device.AMBILIGHT_DEVICE:
+									err = devices[topics[1]].(*device.AmbilightDevice).RunMethod(&dev, method,
+										utils.ConvertToString(msg, "effect"), utils.ConvertToInt(msg, "duration"))
+									p.Payload = devices[topics[1]].(*device.AmbilightDevice).String()
+								default:
+									log.Println("unknown device, can't run method")
 								}
 
-								if *debug {
-									log.Printf("run %s result %v", method, res)
+								if err == nil {
+									mqtt.Send <- p
+								} else {
+									log.Println("error apply changes", err)
 								}
 							} else {
 								switch dev.Type() {
 								case device.LIGHT_DEVICE:
-									d := dev.(*device.LightDevice)
-									orig := devices[topics[1]].(*device.LightDevice)
-									if orig.Name != d.Name {
-										res, err := dev.Run("set_name", []string{d.Name})
-										if err != nil {
-											log.Printf("error run %s: %v", "set_name", err)
-										}
-										if *debug {
-											log.Printf("run %s result %v", "set_name", res)
-										}
-									}
-									if orig.Power != d.Power {
-										state := "on"
-										if d.Power == false {
-											state = "off"
-										}
-										res, err := dev.Run("set_power", []string{state, effect, duration, "0"})
-										if err != nil {
-											log.Printf("error run %s: %v", "set_name", err)
-										}
-										if *debug {
-											log.Printf("run %s result %v", "set_name", res)
-										}
-									}
-									if orig.Version != d.Version {
-										//
-									}
-									if orig.Bright != d.Bright {
-										//
-									}
-									if orig.ColorMode != d.ColorMode {
-										//
-									}
-									if orig.ColorTemp != d.ColorTemp {
-										//
-									}
+									err = devices[topics[1]].(*device.LightDevice).CompareAndUpdate(&dev)
+									p.Payload = devices[topics[1]].(*device.LightDevice).String()
 								case device.RGB_DEVICE:
-									//
+									err = devices[topics[1]].(*device.RgbDevice).CompareAndUpdate(&dev)
+									p.Payload = devices[topics[1]].(*device.RgbDevice).String()
 								case device.AMBILIGHT_DEVICE:
-									//
+									err = devices[topics[1]].(*device.AmbilightDevice).CompareAndUpdate(&dev)
+									p.Payload = devices[topics[1]].(*device.AmbilightDevice).String()
 								default:
 									log.Println("unknown device, can't change state")
 								}
@@ -154,44 +139,12 @@ func main() {
 				if *debug {
 					log.Println("new device from discovery", dev.Retain())
 				}
-				dev.Connect(dev.IP(), discovery)
 				devices[dev.ID()] = dev
 				p.Retain = true
 				p.Payload = dev.Retain()
 			} else {
-				if devices[dev.ID()].IP() == "" {
-					devices[dev.ID()].Connect(dev.IP(), discovery)
-				}
-
-				switch dev.Type() {
-				case device.LIGHT_DEVICE:
-					d := devices[dev.ID()].(*device.LightDevice)
-					orig := devices[dev.ID()].(*device.LightDevice)
-					orig.Name = d.Name
-					orig.Support = d.Support
-					orig.ConvertSupport(d.Support)
-					orig.Power = d.Power
-					orig.Version = d.Version
-					orig.Bright = d.Bright
-					orig.ColorMode = d.ColorMode
-					orig.ColorTemp = d.ColorTemp
-				case device.RGB_DEVICE:
-					d := devices[dev.ID()].(*device.RgbDevice)
-					orig := devices[dev.ID()].(*device.RgbDevice)
-					orig.Name = d.Name
-					orig.Support = d.Support
-					orig.ConvertSupport(d.Support)
-					orig.Power = d.Power
-					orig.Version = d.Version
-					orig.Bright = d.Bright
-					orig.ColorMode = d.ColorMode
-					orig.ColorTemp = d.ColorTemp
-					orig.Rgb = d.Rgb
-					orig.Hue = d.Hue
-					orig.Sat = d.Sat
-				case device.AMBILIGHT_DEVICE:
-					//
-				}
+				// update existing
+				devices[dev.ID()] = dev
 				p.Payload = dev.String()
 			}
 

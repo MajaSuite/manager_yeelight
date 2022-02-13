@@ -81,9 +81,53 @@ Command format
 {"type":1,"model":"ceiling1","method":"toggle","effect":"","duration":"","action":""}
 ```
 
+## methods and parameters
+```markdown
++-----------------+-----+-----------------+----------------+----------------+----------------+     
+| Method          | cnt | Param1          | Param2	       | Param3	        | Param4         |
++-----------------+-----+-----------------+----------------+----------------+----------------+     
+|get_prop         | 1-n | (str)	          | (str)	       | (str)	        | (str)          |
+|set_ct_abx       | 3   |temp(int)        |effect (str)	   |duration (int)  |                |
+|set_rgb          | 3	|rgb(int)         |effect (str)	   |duration (int)  |                |
+|set_hsv          | 4	|hue(int)         |sat (int)	   |effect (str)	|duration(int)   |
+|set_bright       | 3	|bright(int)      |effect (str)	   |duration (int)  |                |
+|set_power        | 3	|power(str)	      |effect(str)	   |duration(int)	|mode(int)       |
+|toggle           | 0	|			      |                |                |                |
+|set_default      | 0	|			      |                |                |                |
+|start_cf         | 3	|duration(int) cnt|mode(int)action | effect (str)   |                |
+|stop_cf          | 0	|			      |                |                |                |
+|set_scene        | 3-4	|effect(str) class|duration (int)  |mode (int)	    |temp (int)      |
+|cron_add         | 2	|mode(int)	      |duration (int)  |                |                |
+|cron_get         | 1	|mode(int)		  |                |                |                |
+|cron_del         | 1	|mode(int)        |                |                |                |
+|set_adjust       | 2	|effect(str) act  |name(str) props |                |                |		
+|set_music        | ??  |                 |                |                |                |
+|set_name	      | 1	|name             |                |                |                |
+|dev_toggle	      | 0	|                 |                |                |                |
+|adjust_bright    | 2	|bright (int)     |duration (int)  |                |                |		
+|adjust_ct        | 2	|temp (int)	      |duration (int)  |                |                |
+|adjust_color     | 2	|mode (int)       |duration (int)  |                |                |
+|bg_set_rgb       | 3	|rgb (int)        |effect (str)    |duration (int)  |                |
+|bg_set_hsv       | 4	|hue (int)        |sat (int)       |effect (str)    |duration (int)  |
+|bg_set_ct_abx    | 3	|temp (int)       |effect (str)    |duration (int)  |                |
+|bg_start_cf      | 3	|duration (int)cnt|mode(int)action |effect (str)    |                |
+|bg_stop_cf       | 0	|                 |                |                |                |
+|bg_set_scene     | 3-4	|effect (str)class|duration(int)   |mode (int)      |temp (int)      |
+|bg_set_default   |	0   |                 |                |                |                |
+|bg_set_bright    | 3	|bright (int)     |effect (str)	   |duration (int)  |                |
+|bg_set_power     | 3	|power(str)	      |effect (str)    |duration (int)  |mode (int)      |
+|bg_set_adjust    | 2	|effect(str)action|name(str)props  |                |                |		
+|bg_toggle        | 0	|                 |                |                |                |
+|bg_adjust_bright | 2	|bright (int)     |duration(int)   |                |                |		
+|bg_adjust_ct     | 2	|temp (int)       |duration(int)   |                |                |		
+|bg_adjust_color  | 2	|mode (int)       |duration(int)   |                |                |
++-----------------+-----+-----------------+----------------+----------------+----------------+
+```
+
 ## Known problems
 
-.... still in early development stage.
+From architect point of view it looks fine for now. Need to add missing implementation. Now "name" and "power"/"toggle" 
+only works.
 
 ## License and author
 
